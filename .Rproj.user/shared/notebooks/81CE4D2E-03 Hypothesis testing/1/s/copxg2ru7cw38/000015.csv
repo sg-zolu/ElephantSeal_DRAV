@@ -1,0 +1,7 @@
+"0","# Reading in the dataset
+#Import data
+data <- read.csv(""01 Data/dive_summary.csv"")
+"
+"2","Warning: cannot open file '01 Data/dive_summary.csv': No such file or directory"
+"2","Error in file(file, ""rt"") : cannot open the connection
+"

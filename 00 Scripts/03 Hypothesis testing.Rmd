@@ -1,0 +1,407 @@
+---
+title: "06 Hypothesis testing v5"
+output: html_document
+date: "2023-10-19"
+---
+
+# Read the data in
+
+```{r}
+# Reading in the dataset
+#Import data
+data <- read.csv("01 Data/dive_summary.csv")
+
+#Criteria for analysis
+data <- subset(data, avg_pitch <= -60)
+data <- subset(data, glide_duration >= 10)
+data <- subset(data, initial_depth <= 30)
+data <- subset(data, r_sq >= 0.7)
+data <- subset(data, min_v < initial_v)
+
+# Store the final output into a data named data.s
+data.s <- data
+
+# Change duration into minutes
+data.s$Duration <- data.s$Duration/60
+
+```
+
+# Hypothesis testing
+
+We will be testing what factors are influencing the change in diving air volume. It is important to construct a causation diagram - make sure to understand the direction of the causality, by constructing a causation diagram.
+
+Factors affecting DRAV will be:
+* RMS stroke intensity
+* Depth at stroke cessation
+* Glide duration
+
+Factors that the seal can control from DRAV will be:
+* Maximum dive depth
+* Dive duration
+* Body density
+
+Key point is that when we are trying to understand the causal link between DRAV and how the seal may control DRAV, it is always important to check the relationships between the variables.
+Ex. Dive duration and dive depth correlates.
+
+```{r}
+# Dive depth and dive duration
+plot(Duration ~ MaxD, data=data.s)
+cor(data.s$Duration, data.s$MaxD) # Correlation
+
+```
+You see that the correlation is not perfect. If this relationship was 1:1, then we can choose either duration or dive depth. If this was completely scattered, then we can include both variables in the global model to test the variable separately. However, this is in between - instead of choosing what you want to test, it is always good practice to check the model fit for all the variables and state which model was selected.
+
+## Model construction - Normal distribution
+
+We will construct a global model containing the factors that the seal may consider to change its diving respiratory air volume.
+
+```{r}
+# Create a dataframe for hypothesis testing
+data.s.h <- data.s[,c("Vair","Duration","body_density","MaxD","Individual","Day")]
+# Make sure Individual and Day are factors
+data.s.h$Individual <- as.factor(data.s.h$Individual)
+data.s.h$Day <- as.factor(data.s.h$Day)
+# Change Day to keep it consistent with other individuals - there are some days with only one data point even though they were collected in the same time interval.
+levels(data.s.h$Day)
+
+library(plyr)
+revalue(data.s.h$Day, c("3"="2", "10"="9","18"="17","25"="24"))
+# Revalue is done to keep the random effects consistent.
+# The reason why we have day 3, 10, 18 and 25 is because the data fpr day 2 and 9 were unavailable for individual ml18_294a. Since the gaps for each day are consistent across this individual, we revalued the days to keep consistency across individuals, to fully capture the random effect. 
+
+# Check new data frame
+View(data.s.h)
+# Construct a global linear mixed model with all factors
+library(lme4)
+global.mix <- lmer(Vair ~ Duration + body_density + MaxD + (1|Individual/Day), data = data.s.h)
+
+# Scale the data for linear mixed model construction
+data.scaled <- data.frame(scale(data.s[,c("Vair","Duration","body_density","MaxD")], center = T, scale = T))
+# Set Individual as a factor
+data.scaled$Individual <- as.factor(data.s.h$Individual)
+data.scaled$Day <- as.factor(data.s.h$Day)
+# Unscale the response variable for easier interpretation
+data.scaled$Vair <- data.s.h$Vair
+# Construct a scaled global model
+global.mix.scale <- lmer(Vair ~ Duration + body_density + MaxD + (1|Individual/Day), data = data.scaled)
+
+```
+
+Here, I made two models - one with the raw values and one with the scaled values.
+The scaled model is made for model comparison of linear mixed models
+
+## AIC and dredging from multimodel inferences
+
+Using the global model that we have constructed, we will go through the dredge function to see which variable has a good model fit.
+
+Using AIC weights, we will move onto variable selection using the dredge function. Here, we will use the lmer() function but with REML = FALSE, to make sure Maximum Likelihood estimation is used to fit the model, which can be compared with different models.
+
+```{r}
+### Information Theory ###
+options(na.action = "na.fail") # make sure that variable selection
+# will NOT undergo if there are NAs (NOT OMIT)
+# This is because the number of data will make the AIC non-comparable
+
+# Here, we will initially conduct variable selection using the AIC 
+# approach; the Akaike weights of each variable
+library(MuMIn)
+
+# Set REML = FALSE to make sure the models are comparable.
+global.mix.test <- lmer(Vair ~ Duration + body_density + MaxD + (1|Individual/Day), data = data.scaled, REML = FALSE)
+summary(global.mix.test)
+
+# We will use the dredge function to see which model was selected.
+dredge(global.mix.test)
+
+# Using the dredge function to compare the summed Akaike weight
+# for the variables in the global model.
+AIC.results <- dredge(global.mix.test)
+
+# The results of the Akaike weights are shown here:
+sw(AIC.results)
+
+#                      body_density Duration MaxD
+# Sum of weights:      1.00         1.00     0.9
+# N containing models:    4            4        4
+
+# mod 1: AIC weights > 0.99
+mod1 <- lmer(Vair ~ body_density + Duration + (1|Individual/Day), data = data.scaled, REML = FALSE)
+
+# mod 2: AIC weights > 0.80
+mod2 <- lmer(Vair ~ body_density + Duration + MaxD + (1|Individual/Day), data = data.scaled, REML = FALSE)
+
+# mod 3: body density and maxD
+mod3 <- lmer(Vair ~ body_density + MaxD + (1|Individual/Day), data = data.scaled, REML = FALSE)
+
+AIC(mod1, mod2, mod3)
+
+# mod2 has the lowest AIC, but mod1 and mod2 does not have a huge difference (~3), but mod3 has a huge difference. the Summed Akaike weights also indicate that duration is justified to use instead of dive depth.
+
+```
+
+mod2 and mod1 had an AIC difference of 3.22, which indicates that the two models are not too different (<10). Therefore, it is difficult to disentangle the effects from dive duration and dive depth. However, mod3 had a 10-fold difference from mod1 and mod2, which indicates that dive duration has a better model fit than dive depth, and thus the use of dive duration is justified to understand how the seal changes its DRAV. 
+From this result, we will use mod1, the simple model for testing how the animal changes its air volume.
+
+Now the final model was selected, we will look into the summary table of the final model.
+```{r}
+# This agrees with mod1
+# We will now treat Individual as a random effect:
+final <- lmer(Vair ~ Duration + body_density + (1|Individual/Day), data = data.s.h)
+
+### Final Model ###
+# The final global model:
+summary(final)
+summary(final)$coefficients
+
+# Checking assumptions
+par(mfrow=c(1,1))
+# Checking the variance of the residuals
+plot(final)
+# Checking the distribution of the residuals
+qqnorm(resid(final))
+qqline(resid(final))
+
+```
+
+The residual plot and the QQ-plot are slightly off. We could improve the model fit by using a gamma distribution, since DRAV can not be 0, and slightly skewed. 
+
+## Model construction 2 - Gamma distribution
+
+The Gamma distribution is bound to 0, and there is a physiological limit to the minimum air volume the seals can carry. This property may allow the Gamma distribution to be a better fit than a normal distribution.
+
+Let's make a generalized linear mixed model using the gamma distribution with a log link.
+
+```{r}
+# Generalized linear mixed model with Gamma distribution
+global.gamma <- glmer(Vair ~ Duration + body_density + MaxD + (1|Individual/Day), data = data.s.h, nAGQ = 0, family = Gamma(link = "log"))
+
+# Checking assumptions
+par(mfrow=c(1,1))
+# Checking the variance of the residuals
+plot(global.gamma)
+# Checking the distribution of the residuals
+qqnorm(resid(global.gamma))
+qqline(resid(global.gamma))
+
+summary(global.gamma)
+
+```
+The glmm with a gamma distribution seems to have a better model fit than the model using Gaussian. I will go with the Gamma distribution as it captures the property of the DRAV better than the normal distribution. Before we justify the use of the Gamma distribution, I will conduct a Likelihood ratio test for the two models, since the use of different distributions imply the difference in likelihood estimations.
+
+Repeat model selection with AIC using the gamma distribution
+
+```{r}
+# Set REML = FALSE to make sure the models are comparable.
+global.mix.gamma.test <- glmer(Vair ~ Duration + body_density + MaxD + (1|Individual/Day), data = data.scaled, family = Gamma(link = "log"))
+summary(global.mix.gamma.test)
+
+# We will use the dredge function to see which model was selected.
+dredge(global.mix.gamma.test)
+
+# Using the dredge function to compare the summed Akaike weight
+# for the variables in the global model.
+AIC.results <- dredge(global.mix.gamma.test)
+
+# The results of the Akaike weights are shown here:
+sw(AIC.results)
+
+#                      body_density Duration MaxD
+# Sum of weights:      1.00         0.97     0.88
+# N containing models:    4            4        4
+
+# mod1
+mod1.gamma <- glmer(Vair ~ Duration + body_density + MaxD + (1|Individual/Day), data = data.scaled, family = Gamma(link = "log"))
+
+# mod 2:
+mod2.gamma <- glmer(Vair ~ Duration + body_density + (1|Individual/Day), data = data.scaled, family = Gamma(link = "log"))
+
+# mod 3
+mod3.gamma <- glmer(Vair ~ body_density + MaxD + (1|Individual/Day), data = data.scaled, family = Gamma(link = "log"))
+
+AIC(mod1.gamma, mod2.gamma, mod3.gamma)
+
+# mod2 has the lowest AIC, but mod1 and mod2 does not have a huge difference (~3), but mod3 has a huge difference. the Summed Akaike weights also indicate that duration is justified to use instead of dive depth.
+```
+
+The final model is:
+
+```{r}
+# This agrees with mod1
+# We will now treat Individual as a random effect:
+final.gamma <- glmer(Vair ~ Duration + body_density + (1|Individual/Day), data = data.s.h, nAGQ=0, family = Gamma(link = "log"))
+
+### Final Model ###
+# The final global model:
+summary(final.gamma)
+summary(final.gamma)$coefficients
+
+# Checking assumptions
+par(mfrow=c(1,1))
+# Checking the variance of the residuals
+plot(final.gamma)
+# Checking the distribution of the residuals
+qqnorm(resid(final.gamma))
+qqline(resid(final.gamma))
+```
+
+Note:
+nAGQ means 'number of adaptive Gauss-Hermite quadrature points', and sets how glmer will integrate out the random effects when fitting the mixed model. When nAGQ is greater than 1, then adaptive quadrature is used with nAGQ points. When nAGQ =
+1, the Laplace approximation is used, and when nAGQ = 0, the integral is 'ignored'. Without being too specific (and therefore perhaps too technical), nAGQ = 0 means that the random effects only influence the estimates of the fixed effects through their estimated conditional modes -- therefore, nAGQ = 0 does not completely account for the randomness of the random effects. To fully account for the random effects, they need to be integrated out. However, as you discovered this difference between nAGQ = 0 and nAGQ = 1 can often be fairly small.
+
+## Gaussian vs Gamma
+Given that we have two models with different distributions, we will compare the two models using a liklihood ratio test.
+
+```{r}
+# Likelihood ratio test
+LRT.results <- anova(mod1,mod1.gamma,test = 'LRT')
+LRT.results
+```
+
+The AIC is lower for the gamma, which had a lower negative log likelihood.
+We will use the predictions from the gamma model.
+
+
+## Prediction
+Now we have selected mod2 as the model that describes how the seals vary their air volume.
+Using the described model, we will calculate the predicted values of Vair with Duration and body density.
+
+Make new data frames to predict Vair in relation to each continuous variable - this will be done by holding one of each continuous variable constant.
+
+```{r}
+## Create a dataframe for the predicted values.
+
+# Only varying duration
+pred.df.Dur <- data.frame(Vair = data.s.h$Vair, body_density = mean(data.s.h$body_density), Duration = data.s.h$Duration, Individual = factor(data.s.h$Individual), Day = factor(data.s.h$Day))
+
+# only varying body density
+pred.df.BD <- data.frame(Vair = data.s.h$Vair, body_density = data.s.h$body_density, Duration = mean(data.s.h$Duration), Individual = factor(data.s.h$Individual), Day = factor(data.s.h$Day))
+
+```
+
+Here, we will only predict from the fixed effects fro the mixed model, using the lmer4 package.
+The fixed effect can be accessed by introducing the re.form = NA argument in the predict function - this will enable the predict function to ignore the random effect and give you the predictions based on the fixed effects.
+
+When constructing a linear model and confidence intervals, it is best to bootstrap the values using the bootMer() function from lmer4.
+
+```{r}
+# Now getting the confidence intervals from only the fixed effects:
+## Using the lme4::bootMer() method
+# Method 2: This contains only the uncertainty from fixed effects.
+# Calculate predicted values for duration (holding body density and MaxD constant at the mean):
+mySumm1 <- function(.) {
+  predict(.,re.form=NA,newdata=pred.df.Dur,type="response") # re.form = NA argument removes the random effects
+}
+
+boot.Dur <- lme4::bootMer(final.gamma, mySumm1, nsim=500, use.u=TRUE, type="parametric")
+
+CI.boot.Dur <- sumBoot(boot.Dur)
+
+# Calculate predicted values for BD (holding duration and MaxD constant at the mean):
+mySumm2 <- function(.) {
+  predict(.,re.form=NA,newdata=pred.df.BD,type="response")
+}
+
+boot.BD <- lme4::bootMer(final.gamma, mySumm2, nsim=500, use.u=TRUE, type="parametric")
+
+CI.boot.BD <- sumBoot(boot.BD)
+
+# Insert the raw data into the dataframe (holding body density constant and MaxD)
+pred.df.Dur$Vair <- data.s.h$Vair
+pred.df.Dur$pred <- predict(final.gamma,data.s.h,type="response") # This is for the data points for the marginal effects plot
+pred.df.Dur$Vair.pred.Dur.CI.fit <- CI.boot.Dur$fit # This is for constructing the line
+pred.df.Dur$Vair.pred.Dur.CI.lwr <- CI.boot.Dur$lwr
+pred.df.Dur$Vair.pred.Dur.CI.upr <- CI.boot.Dur$upr
+
+# Calculate predicted values (holding duration and MaxD):
+pred.df.BD$Vair <- data.s.h$Vair
+pred.df.BD$pred <- predict(final.gamma,data.s.h,type="response") # This is for the data points for the marginal effects plot
+pred.df.BD$Vair.pred.BD.CI.fit <- CI.boot.BD$fit  # This is for constructing the line
+pred.df.BD$Vair.pred.BD.CI.lwr <- CI.boot.BD$lwr
+pred.df.BD$Vair.pred.BD.CI.upr <- CI.boot.BD$upr
+
+```
+
+
+## Data Visualisation
+
+Here, we will plot Marginal effects plot using the predicted values from the selected model.
+
+```{r}
+# Use ggplot to illustrate the results:
+library(ggplot2)
+library(gridExtra)
+library(ggeffects) 
+
+# Change the name of individuals into the ID name
+# Duration
+pred.df.Dur$Individual <- factor(pred.df.Dur$Individual)
+levels(pred.df.Dur$Individual) <- c("ml17_301","ml17_280","ml18_292","ml18_294b","ml18_294a","ml19_295a")
+# Reorder factor
+pred.df.Dur$Individual <- factor(pred.df.Dur$Individual, levels = c("ml17_301","ml17_280","ml18_292","ml18_294a","ml18_294b","ml19_295a"))
+
+# BD
+pred.df.BD$Individual <- factor(pred.df.BD$Individual)
+levels(pred.df.BD$Individual) <- c("ml17_301","ml17_280","ml18_292","ml18_294b","ml18_294a","ml19_295a")
+# Reorder factor
+pred.df.BD$Individual <- factor(pred.df.BD$Individual, levels = c("ml17_301","ml17_280","ml18_292","ml18_294a","ml18_294b","ml19_295a"))
+
+# Plot a marginal-effects plot for Vair ~ Duration
+Duration <- ggplot() +
+     geom_point(alpha = 0.5, data = pred.df.Dur, aes(Duration, pred, color = Individual)) + 
+  ylab(expression(paste("DRAV (", "ml ", kg^-1, ")", sep=""))) + 
+  xlab("Duration (s)") + 
+  theme_linedraw(base_size = 15) +
+    theme(legend.title=element_text(size=20),
+        legend.text=element_text(size=20),
+        axis.title=element_text(size=20),
+        axis.text=element_text(size=20))+ 
+     geom_ribbon(data = pred.df.Dur, aes(Duration, Vair,ymin = Vair.pred.Dur.CI.lwr, ymax = Vair.pred.Dur.CI.upr, color = NULL), alpha = .2) +
+     geom_line(data = pred.df.Dur, aes(Duration, Vair.pred.Dur.CI.fit),  alpha = .7, size = 1) + 
+  theme(legend.position = "none")+
+  guides(color=guide_legend(override.aes=list(fill=NA)))
+
+# Plot a marginal-effects plot for Vair ~ Body density
+BD <- ggplot() +
+     geom_point(alpha = 0.5, data = pred.df.BD, aes(body_density, pred,  color = Individual)) + 
+  ylab(expression(paste("DRAV (", "ml ", kg^-1, ")", sep=""))) +
+  xlab(expression(paste(
+    "Body density (", "kg ", m^-3, ")", sep=""))) + 
+  theme_linedraw(base_size = 15) +
+      theme(legend.title=element_text(size=20),
+        legend.text=element_text(size=20),
+        axis.title=element_text(size=20),
+        axis.text=element_text(size=20))+ 
+  theme(legend.key=element_blank()) +
+     geom_ribbon(data = pred.df.BD, aes(body_density, Vair, ymin = Vair.pred.BD.CI.lwr, ymax = Vair.pred.BD.CI.upr, color = NULL), alpha = .2) +
+     geom_line(data = pred.df.BD, aes(body_density, Vair.pred.BD.CI.fit), 
+               alpha = .7, size = 1) +
+  guides(color=guide_legend(override.aes=list(fill=NA)))
+
+# Plot together
+library(ggpubr)
+
+png("99 Data/Duration_BD_Vair_gamma_NEW.png",         # File name
+    width = 1170, height = 600)          # Paper size
+
+# Creating a plot
+ggarrange(Duration, BD, ncol = 2, nrow = 1, common.legend = TRUE,
+          labels=c("A", "B"),
+          font.label = list(size = 25, color = "black"),
+          legend="bottom")
+
+# Closing the graphical device
+dev.off() 
+
+```
+
+Making a table with scaled results:
+
+```{r}
+# Notes: predictor labels (pred.labels) should be listed from top to bottom; dv.labels= the name of the response variable that will be at the top of the table.
+library(sjPlot)
+sjPlot::tab_model(final.gamma,
+                  pred.labels =c("(Intercept)", "Dive duration", "Body density"),
+                  dv.labels= "Effects on DRAV")
+
+```
+

@@ -1,0 +1,420 @@
+---
+title: "05 DRAV Validation"
+output: html_document
+date: "2023-10-11"
+---
+
+```{r}
+################################################################################
+#                 Plots to show the validation of the Method                   #
+################################################################################
+library(scales) # For plotting the results
+
+# Read in data
+validate <- read.csv("01 Data/dive_summary.csv")
+
+# Figure legends used in the analysis
+RMS_xl <- expression(RMS ~ SI ~ 5-15 ~ m ~ "(" ~ ms^-2 ~ ")" )
+Sp_xl <- expression(Descent ~ speed ~ "(" ~ ms-1 ~ ")" )
+
+#Criteria for analysis
+validate <- subset(validate, avg_pitch <= -60)
+validate <- subset(validate, glide_duration >= 10)
+validate <- subset(validate, initial_depth <= 30)
+validate <- subset(validate, r_sq >= 0.7)
+validate <- subset(validate, min_v < initial_v)
+
+# Change the name of individuals into the ID name
+validate$Individual <- factor(validate$Individual)
+levels(validate$Individual) <- c("ml17_301","ml17_280","ml18_292","ml18_294b","ml18_294a","ml19_295a")
+# Reorder factor
+validate$Individual <- factor(validate$Individual, levels = c("ml17_301","ml17_280","ml18_292","ml18_294a","ml18_294b","ml19_295a"))
+
+#For dives with validate data
+validate.s <- validate[!is.na(validate$total_stroke),]
+validate.s$Individual <- factor(validate.s$Individual, levels = c("ml17_301","ml17_280","ml18_292","ml18_294a","ml18_294b","ml19_295a"))
+
+#write.csv(demo, file = "99 Data/RMS_BoyleD.csv")
+
+# Checking model assumptions
+hist(demo$d_calc)
+hist(demo$sway_rms)
+
+# only if you want to do the analysis below without doing the above
+demo <- read.csv("99 Data/RMS_BoyleD.csv")
+
+# Checking model assumptions
+mod1 <- lm(sway_rms ~ d_calc, data = demo)
+par(mfrow=c(2,2))
+plot(mod1)
+summary(mod1)
+
+# Add R-sq value in the plots
+library(grid)
+library(ggplot2)
+
+###RMS validate Intensity and initial depth###
+m1 <- lm(total_stroke ~ initial_depth, data = validate.s)
+plot(m1) # No major violation in assumptions
+summary(m1)
+A_Rsq_sumary <- round(summary(m1)$adj.r.squared,3)
+A_Rsq_sumary_total <- paste("R-squared", " = ", A_Rsq_sumary)
+
+# Create text for the R-sq value
+A_Rsq <- grobTree(textGrob(A_Rsq_sumary_total, x=0.1,  y=0.9, hjust=0,
+  gp=gpar(fontsize=15, fontface="italic")))
+
+RMS_ID <- ggplot(validate.s, aes(x=initial_depth, y=total_stroke/9.8))+
+  geom_point(alpha = 0.5, size=3, aes(col=Individual))+
+  theme_linedraw(base_size = 15) +
+  geom_smooth(method=lm, se=TRUE, col="red")+
+  labs(x="Depth of stroke cessation(m)", y=RMS_xl)+
+  theme(legend.title=element_text(size=15),
+        legend.text=element_text(size=15),
+        axis.title=element_text(size=15),
+        axis.text=element_text(size=15))+ 
+  annotation_custom(A_Rsq)
+
+RMS_ID
+
+###Vair and RMS validate intensity###
+m2 <- lm(Vair ~ total_stroke, data = validate.s)
+plot(m2)
+summary(m2)
+B_Rsq_sumary <- round(summary(m2)$adj.r.squared,3)
+B_Rsq_sumary_total <- paste("R-squared", " = ", B_Rsq_sumary)
+
+# Create text for the R-sq value
+B_Rsq <- grobTree(textGrob(B_Rsq_sumary_total, x=0.1,  y=0.9, hjust=0,
+  gp=gpar(fontsize=15, fontface="italic")))
+
+Vair_RMS <- ggplot(validate.s, aes(x=total_stroke/9.8, y=Vair))+
+  geom_point(alpha = 0.5, size=3, aes(col=Individual),
+             show.legend = FALSE)+
+  theme_linedraw(base_size = 15) +
+  geom_smooth(method=lm, se=TRUE, col="red")+
+  labs(x=RMS_xl, y="DRAV (ml/kg)")+
+  theme(legend.title=element_text(size=15),
+        legend.text=element_text(size=15),
+        axis.title=element_text(size=15),
+        axis.text=element_text(size=15))+ 
+  annotation_custom(B_Rsq)
+
+Vair_RMS
+
+###Vair and initial depth###
+length(validate$Vair)
+m3 <- lm(Vair ~ initial_depth, data = validate)
+plot(m3)
+summary(m3)
+C_Rsq_sumary <- round(summary(m3)$adj.r.squared,3)
+C_Rsq_sumary_total <- paste("R-squared", " = ", C_Rsq_sumary)
+
+# Create text for the R-sq value
+C_Rsq <- grobTree(textGrob(C_Rsq_sumary_total, x=0.1,  y=0.9, hjust=0,
+  gp=gpar(fontsize=15, fontface="italic")))
+
+Vair_ID <- ggplot(validate, aes(x=initial_depth, y=Vair))+
+  geom_point(alpha = 0.5, size=3, aes(col=Individual),
+             show.legend = FALSE)+
+  theme_linedraw(base_size = 15) +
+  geom_smooth(method=lm, se=TRUE, col="red")+
+  labs(x="Depth of stroke cessation(m)", y="DRAV (ml/kg)")+
+  theme(legend.title=element_text(size=15),
+        legend.text=element_text(size=15),
+        axis.title=element_text(size=15),
+        axis.text=element_text(size=15))+ 
+  annotation_custom(C_Rsq)
+
+Vair_ID
+
+# Null plot
+nullplot <- ggplot()
+
+library(ggpubr)
+library(grid)
+
+# Png plot
+png("99 Data/Validation_new.png",         # File name
+    width = 900, height = 600)          # Paper size
+
+# Creating a plot
+ggarrange(Vair_RMS, Vair_ID + rremove("ylab") + rremove("xlab"),
+          ggplot() + theme_void(), RMS_ID,
+          labels=c("A", "B", "", "C"),
+          ncol=2, nrow=2,
+          common.legend = TRUE, legend="bottom",
+          align = "hv")
+
+# Closing the graphical device
+dev.off() 
+
+```
+
+## Plot the gradients for each dive
+```{r}
+### Stroke Intensity and depth ###
+demo <- read.csv("99 Data/Individual_1/Stroke/Day2_3/taiki_dive66.csv",sep=",",header=T)
+demo <- demo[!is.na(demo$sway_rms),]
+
+for(i in length(demo$d)){
+  demo$d_calc <- 1/(1+0.1*demo$d)
+  demo$Individual[i] <- "ml17_301" 
+}
+
+demo <- read.csv("99 Data/Individual_1/Stroke/Day2_3/taiki_dive2.csv")
+demo <- demo[!is.na(demo$sway_rms),]
+demo = 0
+
+#ml17_301
+currentwd <- paste(getwd(),"/99 Data/Individual_1/Stroke/Day2_3/",sep="")
+currentwd <- paste(getwd(),"/99 Data/Individual_1/Stroke/Day9_10/",sep="")
+currentwd <- paste(getwd(),"/99 Data/Individual_1/Stroke/Day17_18/",sep="")
+currentwd <- paste(getwd(),"/99 Data/Individual_1/Stroke/Day24_25/",sep="")
+
+fileList <- grep("taiki", list.files(currentwd), value = TRUE)
+length(fileList)
+#218
+
+for(f in 1:length(fileList)) {
+  demo1 <- read.csv(paste(currentwd,fileList[f],sep=""),sep=",", header=T)
+  demo1 <- demo1[!is.na(demo1$sway_rms),]
+  demo1$d_calc <- 1/(1+0.1*demo1$d)
+  demo1$Individual <- "ml17_301" 
+  demo <- rbind(demo, demo1)
+}
+
+#ml17_280
+currentwd <- paste(getwd(),"/99 Data/Individual_2/Stroke/Day2_3/",sep="")
+currentwd <- paste(getwd(),"/99 Data/Individual_2/Stroke/Day9_10/",sep="")
+currentwd <- paste(getwd(),"/99 Data/Individual_2/Stroke/Day17_18/",sep="")
+currentwd <- paste(getwd(),"/99 Data/Individual_2/Stroke/Day24_25/",sep="")
+
+fileList <- grep("taiki", list.files(currentwd), value = TRUE)
+length(fileList)
+#207
+
+for(f in 1:length(fileList)) {
+  demo1 <- read.csv(paste(currentwd,fileList[f],sep=""),sep=",", header=T)
+  demo1 <- demo1[!is.na(demo1$sway_rms),]
+  demo1$d_calc <- 1/(1+0.1*demo1$d)
+  demo1$Individual <- "ml17_280"
+  demo <- rbind(demo, demo1)
+}
+
+#ml18_292
+currentwd <- paste(getwd(),"/99 Data/Individual_3/Stroke/Day2_3/",sep="")
+currentwd <- paste(getwd(),"/99 Data/Individual_3/Stroke/Day9_10/",sep="")
+currentwd <- paste(getwd(),"/99 Data/Individual_3/Stroke/Day17_18/",sep="")
+currentwd <- paste(getwd(),"/99 Data/Individual_3/Stroke/Day24_25/",sep="")
+
+fileList <- grep("taiki", list.files(currentwd), value = TRUE)
+length(fileList)
+#207
+
+for(f in 1:length(fileList)) {
+  demo1 <- read.csv(paste(currentwd,fileList[f],sep=""),sep=",", header=T)
+  demo1 <- demo1[!is.na(demo1$sway_rms),]
+  demo1$d_calc <- 1/(1+0.1*demo1$d)
+  demo1$Individual <- "ml18_292"
+  demo <- rbind(demo, demo1)
+}
+
+#ml18_294a
+currentwd <- paste(getwd(),"/99 Data/Individual_6/Stroke/Day3_4/",sep="")
+currentwd <- paste(getwd(),"/99 Data/Individual_6/Stroke/Day10_11/",sep="")
+currentwd <- paste(getwd(),"/99 Data/Individual_6/Stroke/Day18_19/",sep="")
+currentwd <- paste(getwd(),"/99 Data/Individual_6/Stroke/Day25_26/",sep="")
+
+fileList <- grep("taiki", list.files(currentwd), value = TRUE)
+length(fileList)
+#207
+
+for(f in 1:length(fileList)) {
+  demo1 <- read.csv(paste(currentwd,fileList[f],sep=""),sep=",", header=T)
+  demo1 <- demo1[!is.na(demo1$sway_rms),]
+  demo1$d_calc <- 1/(1+0.1*demo1$d)
+  demo1$Individual <- "ml18_294a"
+  demo <- rbind(demo, demo1)
+}
+
+#ml18_294b
+currentwd <- paste(getwd(),"/99 Data/Individual_5/Stroke/Day2_3/",sep="")
+currentwd <- paste(getwd(),"/99 Data/Individual_5/Stroke/Day9_10/",sep="")
+currentwd <- paste(getwd(),"/99 Data/Individual_5/Stroke/Day17_18/",sep="")
+currentwd <- paste(getwd(),"/99 Data/Individual_5/Stroke/Day24_25/",sep="")
+
+fileList <- grep("taiki", list.files(currentwd), value = TRUE)
+length(fileList)
+#207
+
+for(f in 1:length(fileList)) {
+  demo1 <- read.csv(paste(currentwd,fileList[f],sep=""),sep=",", header=T)
+  demo1 <- demo1[!is.na(demo1$sway_rms),]
+  demo1$d_calc <- 1/(1+0.1*demo1$d)
+  demo1$Individual <- "ml18_294b"
+  demo <- rbind(demo, demo1)
+}
+
+#ml19_295a
+currentwd <- paste(getwd(),"/99 Data/Individual_7/Stroke/Day2_3/",sep="")
+currentwd <- paste(getwd(),"/99 Data/Individual_7/Stroke/Day9_10/",sep="")
+currentwd <- paste(getwd(),"/99 Data/Individual_7/Stroke/Day17_18/",sep="")
+
+fileList <- grep("taiki", list.files(currentwd), value = TRUE)
+length(fileList)
+#207
+
+for(f in 1:length(fileList)) {
+  demo1 <- read.csv(paste(currentwd,fileList[f],sep=""),sep=",", header=T)
+  demo1 <- demo1[!is.na(demo1$sway_rms),]
+  demo1$d_calc <- 1/(1+0.1*demo1$d)
+  demo1$Individual <- "ml19_295a"
+  demo <- rbind(demo, demo1)
+}
+
+###Plotting overall validate cycle###
+
+length(demo$d_calc)
+#5603 validates
+par(mfrow=c(2,2))
+demo <- subset(demo, dive_no > 0)
+
+#write.csv(demo, "99 Data/demo_new.csv", row.names=TRUE)
+```
+
+# Plot the results
+
+```{r}
+
+demo <- read.csv("99 Data/demo_new.csv",sep=",",header=T)
+
+# Plot for each individual
+demo_ml17_301 <- subset(demo, Individual == "ml17_301")
+demo_ml17_280 <- subset(demo, Individual == "ml17_280")
+demo_ml18_292 <- subset(demo, Individual == "ml18_292")
+demo_ml18_294a <- subset(demo, Individual == "ml18_294a")
+demo_ml18_294b <- subset(demo, Individual == "ml18_294b")
+demo_ml19_295a <- subset(demo, Individual == "ml19_295a")
+
+# Construct ggplot for each individual
+ml17_301.text <- grobTree(textGrob("ml17_301", x=0.1,  y=0.9, hjust=0,
+  gp=gpar(fontsize=15, fontface="bold")))
+
+ml17_301.p <- ggplot(data = demo_ml17_301, aes(x = d_calc, y = sway_rms/9.8, group = dive_no)) +
+  geom_line(stat="smooth",method = "lm", formula = y ~ x, alpha = 0.5) +
+  ylim(0,0.025)+
+  ylab(expression(paste("RMS SI 5 - 15m (",ms^-2, ")", sep=""))) +
+  xlab(expression(paste("1 + (0.1 \u00D7 depth)", sep=""))) + 
+    theme_linedraw(base_size = 15)+ 
+  annotation_custom(ml17_301.text)
+
+ml17_280.text <- grobTree(textGrob("ml17_280", x=0.1,  y=0.9, hjust=0,
+  gp=gpar(fontsize=15, fontface="bold")))
+
+ml17_280.p <- ggplot(data = demo_ml17_280, aes(x = d_calc, y = sway_rms/9.8, group = dive_no)) +
+  geom_line(stat="smooth",method = "lm", formula = y ~ x, alpha = 0.5) +
+  ylim(0,0.025)+
+  ylab(expression(paste("RMS SI 5 - 15m (",ms^-2, ")", sep=""))) +
+  xlab(expression(paste("1 + (0.1 \u00D7 depth)", sep=""))) + 
+    theme_linedraw(base_size = 15)+ 
+  annotation_custom(ml17_280.text)
+
+ml18_292.text <- grobTree(textGrob("ml18_292", x=0.1,  y=0.9, hjust=0,
+  gp=gpar(fontsize=15, fontface="bold")))
+
+ml18_292.p <- ggplot(data = demo_ml18_292, aes(x = d_calc, y = sway_rms/9.8, group = dive_no)) +
+  geom_line(stat="smooth",method = "lm", formula = y ~ x, alpha = 0.5) +
+  ylim(0,0.025)+
+  ylab(expression(paste("RMS SI 5 - 15m (",ms^-2, ")", sep=""))) +
+  xlab(expression(paste("1 + (0.1 \u00D7 depth)", sep=""))) + 
+    theme_linedraw(base_size = 15)+ 
+  annotation_custom(ml18_292.text)
+
+ml18_294a.text <- grobTree(textGrob("ml18_294a", x=0.1,  y=0.9, hjust=0,
+  gp=gpar(fontsize=15, fontface="bold")))
+
+ml18_294a.p <- ggplot(data = demo_ml18_294a, aes(x = d_calc, y = sway_rms/9.8, group = dive_no)) +
+  geom_line(stat="smooth",method = "lm", formula = y ~ x, alpha = 0.5) +
+  ylim(0,0.025)+
+  ylab(expression(paste("RMS SI 5 - 15m (",ms^-2, ")", sep=""))) +
+  xlab(expression(paste("1 + (0.1 \u00D7 depth)", sep=""))) + 
+    theme_linedraw(base_size = 15)+ 
+  annotation_custom(ml18_294a.text)
+
+ml18_294b.text <- grobTree(textGrob("ml18_294b", x=0.1,  y=0.9, hjust=0,
+  gp=gpar(fontsize=15, fontface="bold")))
+
+ml18_294b.p <- ggplot(data = demo_ml18_294b, aes(x = d_calc, y = sway_rms/9.8, group = dive_no)) +
+  geom_line(stat="smooth",method = "lm", formula = y ~ x, alpha = 0.5) +
+  ylim(0,0.025)+
+  ylab(expression(paste("RMS SI 5 - 15m (",ms^-2, ")", sep=""))) +
+  xlab(expression(paste("1 + (0.1 \u00D7 depth)", sep=""))) + 
+    theme_linedraw(base_size = 15)+ 
+  annotation_custom(ml18_294b.text)
+
+ml19_295a.text <- grobTree(textGrob("ml19_295a", x=0.1,  y=0.9, hjust=0,
+  gp=gpar(fontsize=15, fontface="bold")))
+
+ml19_295a.p <- ggplot(data = demo_ml19_295a, aes(x = d_calc, y = sway_rms/9.8, group = dive_no)) +
+  geom_line(stat="smooth",method = "lm", formula = y ~ x, alpha = 0.5) +
+  ylim(0,0.025)+
+  ylab(expression(paste("RMS SI 5 - 15m (",ms^-2, ")", sep=""))) +
+  xlab(expression(paste("1 + (0.1 \u00D7 depth)", sep=""))) + 
+    theme_linedraw(base_size = 15)+ 
+  annotation_custom(ml19_295a.text)
+
+# Arrange the output:
+library(ggpubr)
+output <- ggarrange(ml17_280.p, ml17_301.p, ml18_292.p, ml18_294a.p, ml18_294b.p, ml19_295a.p, ncol = 2, nrow = 3)
+
+# Customizing the output
+pdf("99 Data/RMS_depth.pdf",         # File name
+    width = 8.3, height = 11.7, # Width and height in inches
+    colormodel = "cmyk" ,   # Color model (cmyk is required for most publications)
+    paper = "A4")          # Paper size
+
+png("99 Data/RMS_depth.png",         # File name
+    width = 830, height = 1170)          # Paper size
+
+
+# Creating a plot
+output
+
+# Closing the graphical device
+dev.off() 
+
+```
+
+## Sensitivity analysis
+
+```{r}
+# Read data with different drag coefficient values
+Cdf_0.02 <- read.csv("01 Sensitivity analysis/Taiki_strokeOut_Cdf0.02.csv")
+Cdf_0.03 <- read.csv("01 Sensitivity analysis/All_strokeOut.csv")
+Cdf_0.04 <- read.csv("01 Sensitivity analysis/Taiki_strokeOut_Cdf0.04.csv")
+
+# Only read in relevant columns
+Cdf_0.02 <- Cdf_0.02[,c("Vair","DiveNo","initial_depth","total_stroke","Individual","avg_pitch","glide_duration","r_sq", "min_v", "Day")]
+Cdf_0.03 <- Cdf_0.03[,c("Vair","DiveNo","initial_depth","total_stroke","Individual","avg_pitch","glide_duration","r_sq", "min_v", "Day")]
+Cdf_0.04 <- Cdf_0.04[,,c("Vair","DiveNo","initial_depth","total_stroke","Individual","avg_pitch","glide_duration","r_sq", "min_v", "Day")]
+
+# Combine the data set into one data frame
+sens <- rbind(Cdf_0.02,Cdf_0.03,Cdf_0.04)
+
+# Run through the criteria for each dataset
+#Criteria for analysis
+sens <- subset(sens, avg_pitch <= -60)
+sens <- subset(sens, glide_duration >= 10)
+sens <- subset(sens, initial_depth <= 30)
+sens <- subset(sens, r_sq >= 0.7)
+sens <- subset(sens, min_v < initial_v)
+
+#Day
+sens <- subset(sens, Day < 30)
+
+
+
+```
+
+
